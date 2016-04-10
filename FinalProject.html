@@ -1,0 +1,428 @@
+<html>
+
+<head>
+<title>Joao Vitor - Final Project</title>
+</head>
+
+<body>
+
+<script src="Three.js"></script>
+<script src="OrbitControls.js"></script>
+<script src="OBJMTLLoader.js"></script>
+<script src="MTLLoader.js"></script>
+<script src="DDSLoader.js"></script>
+<script src="helper-utils.js"></script>
+
+<script id="vertexShaderSun" type="x-shader/x-vertex">
+// Second Pair of Vertex&Fragment shaders used for the Sun
+uniform sampler2D noiseTextureSun;
+varying vec2 textureCoordinatesSun;
+uniform float timeSun;
+varying float displacementSun;
+void main()
+{
+   textureCoordinatesSun = uv;
+   vec2 shiftedCoordinatesSun = textureCoordinatesSun + vec2(timeSun, timeSun);
+   vec2 fixedCoordinatesSun = mod( shiftedCoordinatesSun, 1.0 );
+   vec4 noiseColorSun = texture2D( noiseTextureSun, fixedCoordinatesSun );
+   
+   displacementSun = noiseColorSun.r;
+   vec3 offsetSun = position + displacementSun * normal * 0.5;
+   gl_Position = projectionMatrix * modelViewMatrix *
+					vec4( offsetSun, 1.0 );
+}
+</script>
+<script id="fragmentShaderSun" type="x-shader/x-vertex">
+// Second Pair of Vertex&Fragment shaders used for the Sun
+uniform sampler2D baseTextureSun;
+uniform sampler2D noiseTextureSun;
+uniform float timeSun;
+varying vec2 textureCoordinatesSun;
+varying float displacementSun;
+void main()
+{
+    vec4 noiseColorSun = texture2D( noiseTextureSun, textureCoordinatesSun );
+	vec2 noiseCoordinatesSun = textureCoordinatesSun 
+	                        + vec2( noiseColorSun.r, noiseColorSun.g )
+							+ vec2( 0.7 * timeSun, 0.8 * timeSun );
+	vec2 fixedCoordinatesSun = mod( noiseCoordinatesSun, 1.0 );
+    // extract RGBA data from image
+	vec4 baseColorSun = texture2D( baseTextureSun, fixedCoordinatesSun );
+	gl_FragColor = baseColorSun;
+}
+</script>
+
+<!-- Separate! --><!-- Separate! --><!-- Separate! --><!-- Separate! --><!-- Separate! --><!-- Separate! --><!-- Separate! -->
+
+
+<script id="vertexShader" type="x-shader/x-vertex">
+// First Pair of Vertex&Fragment shaders used for the water
+uniform sampler2D noiseTexture;
+varying vec2 textureCoordinates;
+uniform float time;
+varying float displacement;
+void main()
+{
+   textureCoordinates = uv;
+   vec2 shiftedCoordinates = textureCoordinates + vec2(time, time);
+   vec2 fixedCoordinates = mod( shiftedCoordinates, 1.0 );
+   vec4 noiseColor = texture2D( noiseTexture, fixedCoordinates );
+   
+   displacement = noiseColor.r;
+   vec3 offset = position + displacement * normal * 5.0;
+   gl_Position = projectionMatrix * modelViewMatrix *
+					vec4( offset, 1.0 );
+}
+</script>
+<script id="fragmentShader" type="x-shader/x-vertex">
+// First Pair of Vertex&Fragment shaders used for the water
+uniform sampler2D baseTexture;
+uniform sampler2D noiseTexture;
+uniform float time;
+varying vec2 textureCoordinates;
+varying float displacement;
+void main()
+{
+    vec4 noiseColor = texture2D( noiseTexture, textureCoordinates );
+	vec2 noiseCoordinates = textureCoordinates 
+	                        + vec2( noiseColor.r, noiseColor.g )
+							+ vec2( 0.7 * time, 0.5 * time );
+	vec2 fixedCoordinates = mod( noiseCoordinates, 1.0 );
+    // extract RGBA data from image
+	vec4 baseColor = texture2D( baseTexture, fixedCoordinates );
+	baseColor = baseColor + vec4(1.0, 1.0, 1.0, 1.0) * displacement * 2.0 - 0.4;
+	baseColor.a = 0.7;
+	gl_FragColor = baseColor;
+}
+</script>
+
+<script>
+//Document event
+document.addEventListener("keydown", onKeyPress);
+
+//Basic Variables for the scene
+var scene, camera, renderer;
+var material, mesh;
+var time;
+
+//Global lights
+var ambientLight, pointLightSun, pointLightHelperSun, pointLightMoon, pointLightHelperMoon;
+var pointLightUnderseaB;
+
+//Global Meshes
+var skyMesh, sunMesh, waterMesh, moonMesh;
+
+//Global Uniforms
+var customUniforms, customUniformsSun;
+
+//Variables for objects controlling
+var shipObject; // ShipCoordinates not necessary to store, they're all stored on this object.
+var fishObjectB;
+var iteration = 0; // Due to assyncronous problems, i have to wait a little bit before put my fishObject in motion, this helps me.
+
+initialize();
+loop();
+
+function initialize()
+{
+	// Basic creation code//////////////////////////////////
+    renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize( window.innerWidth, window.innerHeight );
+    document.body.appendChild( renderer.domElement );
+    scene = new THREE.Scene();
+	// end Basic creation code/////////////////////////////
+
+	// Camera//////////////////////////////////////////////
+    camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 10000 );
+    camera.position.set(0, 20, -30);
+	// end camera//////////////////////////////////////////
+	
+	// Event Listener//////////////////////////////////////
+	controls = new THREE.OrbitControls( camera, renderer.domElement );
+	// end Event Listener///////////////////////////////////
+	
+	// AmbientLight/////////////////////////////////////////
+	ambientLight = new THREE.AmbientLight(0x888888);
+	scene.add(ambientLight);
+	// end ambientLight/////////////////////////////////////
+	
+	//Loader and enablind of shadowmap//////////////////////
+	var loader = new THREE.TextureLoader();
+	renderer.shadowMap.Enabled = true;
+	////////////////////////////////////////////////////////
+	
+	// Creating my fish objects ////////////////////////////
+	var fishLoader = new THREE.OBJMTLLoader();	
+	fishLoader.load( 'HUMPBACK.obj', 'HUMPBACK.mtl', 
+		function ( object ) 
+		{
+			object.position.y = -1.3;
+			object.position.x = 10.0;
+			object.position.z = 10.0;
+			object.scale.set(0.3, 0.3, 0.3);
+			fishObjectB = object;
+			scene.add( object );
+		}
+	);
+	//Bluefish Light
+	pointLightUnderseaB = new THREE.PointLight( 0x0000FF, 1, 100 );
+	pointLightUnderseaB.position.set(10, -1.3, 10 );
+	scene.add( pointLightUnderseaB );
+	// End of fish objects ///////////////////////////////////
+	
+	// Applying water ///////////////////////////////////////////////////////////////////
+	// Custom material for Water
+	var texture1 = loader.load( "cloud.png" );
+	var texture2 = loader.load( "water.jpg" );
+	customUniforms = {
+		baseTexture  : { type: "t", value: texture2 },
+		noiseTexture : { type: "t", value: texture1 },
+		time         : { type: "f", value: 0 }
+	};
+	var customMaterial = new THREE.ShaderMaterial(
+	{
+		uniforms: customUniforms,
+		side: THREE.DoubleSide,
+		transparent: true,
+		vertexShader: document.getElementById("vertexShader").textContent,
+		fragmentShader: document.getElementById("fragmentShader").textContent
+	});
+	// end Custom material for water
+	
+	// Applying water with custom material
+	var waterGeometry = new THREE.PlaneGeometry( 100, 100, 100, 100 );
+	waterMesh = new THREE.Mesh( waterGeometry, customMaterial );
+	waterMesh.position.set(0, -0.9, 0);
+	waterMesh.rotation.x = -3.14 / 2;
+    scene.add( waterMesh ); 
+	// End water//////////////////////////////////////////////////////////////////////////
+	
+	// Ground below water/////////////////////////////////////////////////////////////////
+    var floorGeometry = new THREE.BoxGeometry( 100, 0.1, 100 );
+	var floorTexture = loader.load( "dirtTexture.jpg" );
+	floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping; 
+	floorTexture.repeat.set( 10, 10 );
+	var floorMaterial = new THREE.MeshPhongMaterial( { map: floorTexture} );
+	var floorMesh = new THREE.Mesh( floorGeometry, floorMaterial );
+	floorMesh.position.set(0, -2.0, 0);
+    scene.add( floorMesh ); 
+	// end Ground Below water/////////////////////////////////////////////////////////////
+
+	
+	// Variables for my sky///////////////////////////////////////////////////////////////
+	var skyGeometry = new THREE.SphereGeometry(50, 128, 64);
+	var skyTexture = loader.load("sky.png");
+	var skyMaterial = new THREE.MeshPhongMaterial({map: skyTexture, side: THREE.BackSide});
+	skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
+	scene.add(skyMesh);
+	// end Variables for my sky//////////////////////////////////////////////////////////
+	
+	// Variables for my sun /////////////////////////////////////////////////////////////
+	// Custom material for my Sun
+	var texture3 = loader.load( "cloud2.jpg" );
+	var texture4 = loader.load( "sunTexture.jpg" );
+	customUniformsSun = {
+		baseTextureSun  : { type: "t", value: texture4 },
+		noiseTextureSun : { type: "t", value: texture3 },
+		timeSun         : { type: "f", value: 0 }
+	};
+	var customMaterialSun = new THREE.ShaderMaterial(
+	{
+		uniforms: customUniformsSun,
+		side: THREE.DoubleSide,
+		vertexShader: document.getElementById("vertexShaderSun").textContent,
+		fragmentShader: document.getElementById("fragmentShaderSun").textContent
+	});
+	// end Custom material for my Sun
+	
+	pointLightSun = new THREE.PointLight( 0xFFFF00, 1, 100 );
+	pointLightSun.position.set(0, 10, 40 );
+	scene.add( pointLightSun );
+	var sphereSize = 1;
+	pointLightHelperSun = new THREE.PointLightHelper( pointLightSun, sphereSize );
+	scene.add( pointLightHelperSun );
+
+	var sunGeometry = new THREE.SphereGeometry(3, 128, 64);
+	var sunTexture = loader.load("sunTexture.jpg");
+	var sunMaterial = new THREE.MeshBasicMaterial({map: sunTexture, side: THREE.DoubleSide});
+	sunMesh = new THREE.Mesh(sunGeometry, customMaterialSun);
+	sunMesh.position.set(0, 10, 40);
+	scene.add(sunMesh);
+	// end Variables for my sun////////////////////////////////////////////////////////////
+	
+	// variables for my moon///////////////////////////////////////////////////////////////
+	pointLightMoon = new THREE.PointLight( 0xFFFFFF, 1, 100 );
+	pointLightMoon.position.set(0, -10, -40 );
+	scene.add( pointLightMoon );
+	var sphereSize = 1;
+	pointLightHelperMoon = new THREE.PointLightHelper( pointLightMoon, sphereSize );
+	scene.add( pointLightHelperMoon );
+
+	var moonGeometry = new THREE.SphereGeometry(3, 128, 64);
+	var moonTexture = loader.load("moonT.png");
+	var moonMaterial = new THREE.MeshBasicMaterial({map: moonTexture, side: THREE.DoubleSide});
+	moonMesh = new THREE.Mesh(moonGeometry, moonMaterial);
+	moonMesh.position.set(0, -10, -40);
+	scene.add(moonMesh);
+	// end variables for my moon//////////////////////////////////////////////////////////
+	
+	// My ship object/////////////////////////////////////////////////////////////////////
+	var shipLoader = new THREE.OBJMTLLoader();	
+	shipLoader.load( 'ship.obj', 'ship.mtl', 
+		function ( object ) 
+		{
+			object.position.y = 0.0;
+			shipObject = object;
+			object.scale.set(2, 2, 2);
+			scene.add( object );
+		}
+	);
+	//END My ship object//////////////////////////////////////////////////////////////////
+	
+	//My Eagle objects////////////////////////////////////////////////////////////////////
+	var eagleLoader = new THREE.OBJMTLLoader();	
+	eagleLoader.load( 'EAGLE_2.obj', 'EAGLE_2.mtl', 
+		function ( object ) 
+		{
+			object.position.y = 20.0;
+			object.position.x = -12.0;
+			object.scale.set(2, 2, 2);
+			scene.add( object );
+		}
+	);
+	
+	eagleLoader.load( 'EAGLE_2.obj', 'EAGLE_2.mtl', 
+		function ( object ) 
+		{
+			object.position.y = 14.0;
+			object.position.z = -10.0;
+			object.scale.set(2, 2, 2);
+			scene.add( object );
+		}
+	);
+	
+	eagleLoader.load( 'EAGLE_2.obj', 'EAGLE_2.mtl', 
+		function ( object ) 
+		{
+			object.position.y = 14.0;
+			object.position.x = 6.0;
+			object.scale.set(2, 2, 2);
+			scene.add( object );
+		}
+	);
+	
+	eagleLoader.load( 'EAGLE_2.obj', 'EAGLE_2.mtl', 
+		function ( object ) 
+		{
+			object.position.y = 15.0;
+			object.position.x = -2.0;
+
+			object.scale.set(2, 2, 2);
+			scene.add( object );
+		}
+	);
+	
+	eagleLoader.load( 'EAGLE_2.obj', 'EAGLE_2.mtl', 
+		function ( object ) 
+		{
+			object.position.y = 12.0;
+			object.position.z = 15.0;
+			object.position.x = -4.0;
+			object.scale.set(2, 2, 2);
+			scene.add( object );
+		}
+	);
+	//END My eagle objects////////////////////////////////////////////////////////////////////
+	render();
+}
+
+function loop() 
+{
+	update();
+	render();
+    requestAnimationFrame( loop );
+}
+
+function update()
+{
+	// Seeding time
+	time = Date.now();
+	// Manually creating a "delay" before putting my fishobject and my light in motion, to make sure that both are already in the scene.
+	iteration += 1;
+	if(iteration > 30)
+	{
+		// Creating the rotation for the glowing fish
+		pointLightUnderseaB.position.z = Math.cos(time * 0.0003) * 25;
+		pointLightUnderseaB.position.x = Math.sin(time * 0.0003) * 25;
+		fishObjectB.position.z = Math.cos(time * 0.0003) * 25;
+		fishObjectB.position.x = Math.sin(time * 0.0003) * 25;
+	}
+	// Creating the matching rotation for the spheres
+	pointLightSun.position.z = Math.cos( time * 0.0003 ) * 34;
+	pointLightSun.position.y = Math.sin( time * 0.0003 ) * 34;
+	sunMesh.position.z = Math.cos(time * 0.0003) * 34;
+	sunMesh.position.y = Math.sin(time * 0.0003) * 34;
+	
+	pointLightMoon.position.z = -Math.cos(time * 0.0003) * 34;
+	pointLightMoon.position.y = -Math.sin(time * 0.0003) * 34;
+	moonMesh.position.z = -Math.cos(time * 0.0003) * 34;
+	moonMesh.position.y = -Math.sin(time * 0.0003) * 34;
+	
+	// Used for the distortion
+	customUniforms.time.value += 0.001;
+	customUniformsSun.timeSun.value += 0.001;
+	
+	//Day & Night Check
+	if(pointLightMoon.position.y > 0)
+		skyMesh.rotation.x = 3.14/2 + 3.14/2;
+	else
+		skyMesh.rotation.x = -6.28;
+		
+	if(pointLightMoon.position.y > 0)
+		ambientLight.color.setHex( 0x444444 );
+	else
+		ambientLight.color.setHex( 0x888888 );
+}
+
+function render()
+{
+	renderer.render( scene, camera );
+}
+
+function onKeyPress(eventData)
+{
+	//Event to move the boat.
+	var  name = getKeyString(eventData.keyCode);
+	
+	if (name == "W")
+	{
+		shipObject.rotation.y = 6.28;
+		shipObject.position.z += 0.1;
+	}
+	if (name == "A")
+	{
+		shipObject.rotation.y = 3.14 /2;
+		shipObject.position.x += 0.1;
+	}
+	if (name == "S")
+	{
+		shipObject.rotation.y = 3.14;
+		shipObject.position.z -= 0.1;
+	}
+	if (name == "D")
+	{
+		shipObject.rotation.y = -3.14 /2;
+		shipObject.position.x -= 0.1;
+	}
+	if (name == "Z")
+	{
+		shipObject.position.y -= 0.1;
+	}
+	if (name == "X")
+	{
+		shipObject.position.y += 0.1;
+	}
+}
+</script>
+</body>
+</html>
